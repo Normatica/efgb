@@ -1,0 +1,7 @@
+[Reports]
+StudentsFilename: EFGB Students
+ReportsFolder: Reports
+ReportsPDFFolder: Reports PDF
+EmailFrom: snowfloat@snowfloat.com
+EmailBodyFilename: email_body.txt
+ReportsNameStringToStrip: Livret Scolaire 2016-2017
