@@ -1,0 +1,3 @@
+[Test]
+EmailFrom: snowfloat@snowfloat.com
+EmailBodyFilename: email_body.txt
