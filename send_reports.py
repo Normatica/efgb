@@ -3,6 +3,8 @@ import ConfigParser
 import httplib2
 import io
 import os
+import re
+import time
 import unicodedata
 
 from apiclient import discovery
@@ -82,7 +84,7 @@ def main():
         'ReportsNameStringToStrip')
 
     try:
-        print('Retrieving students list...')
+        print('Retrieving students list from %s...' % (students_filename))
         spreadsheet_id = get_file_id(drive_service, students_filename)
         if spreadsheet_id is None:
             print('Cannot find students file')
@@ -94,12 +96,16 @@ def main():
             print('Cannot find reports folder')
             return
         reports = get_reports(drive_service, reports_folder_id)
+        if len(reports) != len(students.keys()):
+            print('Length reports != students')
+            return
         students = merge_students_with_reports(students, reports,
             reports_name_string_to_strip)
         reports_pdf_folder_id = get_file_id(drive_service, reports_pdf_folder)
         if reports_pdf_folder_id is None:
             print('Cannot find reports PDF folder')
             return
+        return
         print('Exporting PDFs...')
         export_pdfs(drive_service, reports, reports_pdf_folder_id)
         print('Sending emails...')
@@ -112,16 +118,38 @@ def main():
 
 
 def send_emails(service, students, email_from, email_body):
+    emails_sent = []
+    if os.path.exists('emails_sent.txt'):
+        f = open('emails_sent.txt', 'r')
+        emails_sent = [x.strip('\n') for x in f.readlines()]
+        f.close()
+    f = open('emails_sent.txt', 'w')
     for id, info in students.items():
-        email_subject = 'Report - %s' % (info['name'])
+        if info['name'] in emails_sent:
+            continue
+        email_subject = 'Livret de competence / Progress report: %s' % (
+            info['name'])
         email_to = info['email1']
         if info['email2']:
             email_to += ',' + info['email2']
         msg = create_message_with_attachment(email_from,
             email_to, email_subject, email_body,
             info['report_name'] + '.pdf')
-        send_message(service, 'me', msg)
+        print('Sending ' + info['name'] + ' file to: ' + email_to)
+        for i in range(3):
+            try:
+                send_message(service, 'me', msg)
+                break
+            except Exception as e:
+                if i == 2:
+                    raise Exception('Sending failed: ' + str(e))
+                    f.close()
+                time.sleep(5)
+        os.remove(info['report_name'] + '.pdf')
+        f.write(info['name'] + '\n')
+        time.sleep(5)
 
+    f.close()
 
 def get_file_id(service, name):
     page_token = None
@@ -156,19 +184,32 @@ def get_reports(service, folder_id):
 
 def get_students(service, spreadsheet_id):
     students = {}
-    range_name = 'Sheet1!A2:D100'
+    range_name = 'Sheet1!A6:C100'
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id, range=range_name).execute()
     for i, value in enumerate(result['values']):
+        name = value[0]
+        for s in ('PS', 'MS', 'GS', 'CP'):
+            pos = name.find(s)
+            if pos != -1:
+                break
+        if pos != -1:
+            name = value[0][:pos].strip()
         students[i] = {
-            'name': '%s %s' % (value[0], value[1]),
-            'email1': value[2],
+            'name': name,
+            'email1': value[1],
             'report_id': None,
             'report_name': None}
-        if len(value) > 3:
-            students[i]['email2'] = value[3]
+        emails = [value[1],]
+        if len(value) > 2:
+            students[i]['email2'] = value[2]
+            emails.append(value[2])
         else:
             students[i]['email2'] = None
+
+        for email in emails:
+            if not re.match(r"[^@]+@[^@]+\.[^@]+",email):
+                raise Exception("Invalid email: " + email)
 
     return students
 
@@ -178,8 +219,13 @@ def merge_students_with_reports(students, reports, string_to_strip):
         name = students[id]['name']
         name_parts = get_name_parts(name)
         for report in reports:
-            report_name_parts = get_name_parts(report[1].replace(
-                string_to_strip, ''))
+            pos = report[1].find('2016')
+            report_name = report[1][:pos]
+            report_name = report_name.replace('Copy of','')
+            report_name = report_name.replace('Livret scolaire','')
+            report_name_parts = get_name_parts(report_name)
+            print(name_parts)
+            print(report_name_parts)
             if name_parts == report_name_parts:
                 students[id]['report_id'] = report[0]
                 students[id]['report_name'] = report[1]
@@ -198,7 +244,8 @@ def merge_students_with_reports(students, reports, string_to_strip):
 
 
 def get_name_parts(name):
-    parts = [strip_accents(e.strip()) for e in name.split()]
+    n = name.replace('-', ' ').replace('_', ' ')
+    parts = [strip_accents(e.strip()).lower() for e in n.split()]
     return parts
 
 
@@ -225,14 +272,14 @@ def export_pdfs(service, reports, reports_pdf_folder_id):
         media = MediaFileUpload(report[1] + '.pdf',
                                 mimetype='application/pdf',
                                 resumable=True)
-        file = service.files().create(
-            body=file_metadata, media_body=media, fields='id').execute()
+        # file = service.files().create(
+        #    body=file_metadata, media_body=media, fields='id').execute()
 
 
 def send_message(service, user_id, message):
   try:
-    message = (service.users().messages().send(userId=user_id, body=message)
-               .execute())
+    # message = (service.users().messages().send(userId=user_id, body=message)
+    #           .execute())
     return message
   except errors.HttpError, error:
     print('An error occurred: %s' % error)

@@ -1,7 +1,8 @@
 [Reports]
-StudentsFilename: EFGB Students
-ReportsFolder: Reports
-ReportsPDFFolder: Reports PDF
+StudentsFilename: e mails 2016-2017
+ReportsFolder: livrets
+ReportsPDFFolder: Envoi livrets PDFs
 EmailFrom: snowfloat@snowfloat.com
 EmailBodyFilename: email_body.txt
-ReportsNameStringToStrip: Livret Scolaire 2016-2017
+EmailSubject: Rapport - {name}
+ReportsNameStringToStrip: Livret Scolaire 2016 - 2017
