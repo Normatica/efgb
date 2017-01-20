@@ -4,5 +4,5 @@ ReportsFolder: livrets
 ReportsPDFFolder: Envoi livrets PDFs
 EmailFrom: snowfloat@snowfloat.com
 EmailBodyFilename: email_body.txt
-EmailSubject: Rapport - {name}
-ReportsNameStringToStrip: Livret Scolaire 2016 - 2017
+ExportPDFs: False
+SendEmails: False

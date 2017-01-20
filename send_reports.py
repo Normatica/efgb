@@ -3,7 +3,10 @@ import ConfigParser
 import httplib2
 import io
 import os
+import pprint
+import random
 import re
+import string
 import time
 import unicodedata
 
@@ -80,8 +83,11 @@ def main():
     students_filename = Config.get('Reports', 'StudentsFilename')
     email_from = Config.get('Reports', 'EmailFrom')
     email_body_filename = Config.get('Reports', 'EmailBodyFilename')
-    reports_name_string_to_strip = Config.get('Reports',
-        'ReportsNameStringToStrip')
+    reports_name_string_to_strip = ''
+    send_emails_enabled = Config.getboolean('Reports', 'SendEmails')
+    export_pdfs_enabled = Config.getboolean('Reports', 'ExportPDFs')
+    print(export_pdfs_enabled)
+    print(send_emails_enabled)
 
     try:
         print('Retrieving students list from %s...' % (students_filename))
@@ -101,29 +107,43 @@ def main():
             return
         students = merge_students_with_reports(students, reports,
             reports_name_string_to_strip)
+        #d = {}
+        #for k, v in students.items():
+        #    if v['name'] == 'Adrien Luce':
+        #        d[k] = v
+        #        break
+        #students = d
+        pprint.pprint(students)
+        #l = []
+        #for report in reports:
+        #    if 'Adrien LUCE' in report[1]:
+        #        l.append(report)
+        #        break
+        #reports = l
+        pprint.pprint(reports)
         reports_pdf_folder_id = get_file_id(drive_service, reports_pdf_folder)
         if reports_pdf_folder_id is None:
             print('Cannot find reports PDF folder')
             return
-        return
         print('Exporting PDFs...')
-        export_pdfs(drive_service, reports, reports_pdf_folder_id)
+        export_pdfs(drive_service, reports, reports_pdf_folder_id,
+            export_pdfs_enabled)
         print('Sending emails...')
         f = open(email_body_filename)
         email_body = f.read()
         f.close()
-        send_emails(gmail_service, students, email_from, email_body)
+        send_emails(gmail_service, students, email_from, email_body,
+            send_emails_enabled)
     except Exception as e:
         print(str(e))
 
 
-def send_emails(service, students, email_from, email_body):
+def send_emails(service, students, email_from, email_body, send_emails_enabled):
     emails_sent = []
     if os.path.exists('emails_sent.txt'):
         f = open('emails_sent.txt', 'r')
         emails_sent = [x.strip('\n') for x in f.readlines()]
         f.close()
-    f = open('emails_sent.txt', 'w')
     for id, info in students.items():
         if info['name'] in emails_sent:
             continue
@@ -135,20 +155,25 @@ def send_emails(service, students, email_from, email_body):
         msg = create_message_with_attachment(email_from,
             email_to, email_subject, email_body,
             info['report_name'] + '.pdf')
-        print('Sending ' + info['name'] + ' file to: ' + email_to)
-        for i in range(3):
-            try:
-                send_message(service, 'me', msg)
-                break
-            except Exception as e:
-                if i == 2:
-                    raise Exception('Sending failed: ' + str(e))
-                    f.close()
-                time.sleep(5)
+        print('Sending ' + info['report_name'] + ' file to: ' + email_to)
+        print('Subject: ' + email_subject)
+        if send_emails_enabled:
+            for i in range(3):
+                try:
+                    send_message(service, 'me', msg)
+                    emails_sent.append(info['name'])
+                    break
+                except Exception as e:
+                    if i == 2:
+                        raise Exception('Sending failed: ' + str(e))
+                        f.close()
+                    time.sleep(5)
         os.remove(info['report_name'] + '.pdf')
-        f.write(info['name'] + '\n')
         time.sleep(5)
 
+    f = open('emails_sent.txt', 'w')
+    for e in emails_sent:
+        f.write(e + '\n')
     f.close()
 
 def get_file_id(service, name):
@@ -194,14 +219,14 @@ def get_students(service, spreadsheet_id):
             if pos != -1:
                 break
         if pos != -1:
-            name = value[0][:pos].strip()
+            name = value[0][:pos].strip().replace('\n', '')
         students[i] = {
             'name': name,
             'email1': value[1],
             'report_id': None,
             'report_name': None}
         emails = [value[1],]
-        if len(value) > 2:
+        if len(value) > 2 and value[2] != value[1]:
             students[i]['email2'] = value[2]
             emails.append(value[2])
         else:
@@ -224,8 +249,6 @@ def merge_students_with_reports(students, reports, string_to_strip):
             report_name = report_name.replace('Copy of','')
             report_name = report_name.replace('Livret scolaire','')
             report_name_parts = get_name_parts(report_name)
-            print(name_parts)
-            print(report_name_parts)
             if name_parts == report_name_parts:
                 students[id]['report_id'] = report[0]
                 students[id]['report_name'] = report[1]
@@ -249,40 +272,50 @@ def get_name_parts(name):
     return parts
 
 
-def export_pdfs(service, reports, reports_pdf_folder_id):
+def export_pdfs(service, reports, reports_pdf_folder_id, export_pdfs_enabled):
     for report in reports:
+        print(report)
+        print('Exporting ' + report[1] + ' to PDF...')
         request = service.files().export_media(
             fileId=report[0], mimeType='application/pdf')
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk()
+        request.uri = request.uri + '&rnd=' + get_random_string(16)
+        print(request.to_json())
+        for i in range(3):
+            try:
+                response = request.execute()
+                print(len(response))
+                if len(response) == 0:
+                    raise errors.HttpError(response, '')
+                break
+            except errors.HttpError, error:
+                print('Download failed.  Retrying...')
+                if i == 2:
+                    raise
+                time.sleep(5)
+        with open(report[1] + '.pdf', "wb") as wer:
+            wer.write(response)
+        print('Download done')
 
-        fh.seek(0)
-        f = open(report[1] + '.pdf', 'w')
-        f.write(fh.read())
-        f.close()
-        fh.close()
-
-        file_metadata = {
-            'name' : report[1],
-            'parents': [reports_pdf_folder_id],
-            'mimeType' : 'application/pdf'}
-        media = MediaFileUpload(report[1] + '.pdf',
-                                mimetype='application/pdf',
-                                resumable=True)
-        # file = service.files().create(
-        #    body=file_metadata, media_body=media, fields='id').execute()
+        if export_pdfs_enabled:
+            file_metadata = {
+                'name' : report[1],
+                'parents': [reports_pdf_folder_id],
+                'mimeType' : 'application/pdf'}
+            media = MediaFileUpload(report[1] + '.pdf',
+                                    mimetype='application/pdf',
+                                    resumable=True)
+            file = service.files().create(
+               body=file_metadata, media_body=media, fields='id').execute()
 
 
 def send_message(service, user_id, message):
   try:
-    # message = (service.users().messages().send(userId=user_id, body=message)
-    #           .execute())
+    message = (service.users().messages().send(userId=user_id, body=message)
+              .execute())
     return message
   except errors.HttpError, error:
     print('An error occurred: %s' % error)
+    raise
 
 
 def create_message(sender, to, subject, message_text):
@@ -321,6 +354,10 @@ def create_message_with_attachment(
 def strip_accents(s):
     return ''.join(c for c in unicodedata.normalize('NFD', s)
         if unicodedata.category(c) != 'Mn')
+
+def get_random_string(n):
+    return ''.join(random.SystemRandom().choice(
+        string.ascii_uppercase + string.digits) for _ in range(n))
 
 
 if __name__ == '__main__':
