@@ -178,16 +178,20 @@ def send_emails(service, students, email_from, email_body, send_emails_enabled):
 
 def get_file_id(service, name):
     page_token = None
+    ids = []
     while True:
         response = service.files().list(q="name = '" + name + "'",
                                         spaces='drive',
                                         fields='nextPageToken, files(id, name)',
                                         pageToken=page_token).execute()
         for file in response.get('files', []):
-            return file.get('id')
+            ids.append(file.get('id'))
         page_token = response.get('nextPageToken', None)
         if page_token is None:
             break
+
+    if len(ids) == 1:
+        return ids[0]
 
 
 def get_reports(service, folder_id):
@@ -279,7 +283,6 @@ def export_pdfs(service, reports, reports_pdf_folder_id, export_pdfs_enabled):
         request = service.files().export_media(
             fileId=report[0], mimeType='application/pdf')
         request.uri = request.uri + '&rnd=' + get_random_string(16)
-        print(request.to_json())
         for i in range(3):
             try:
                 response = request.execute()
