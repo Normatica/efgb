@@ -3,6 +3,7 @@ import ConfigParser
 import httplib2
 import io
 import os
+import os.path
 import pprint
 import random
 import re
@@ -158,18 +159,23 @@ def send_emails(service, students, email_from, email_body, send_emails_enabled):
         print('Sending ' + info['report_name'] + ' file to: ' + email_to)
         print('Subject: ' + email_subject)
         if send_emails_enabled:
-            for i in range(3):
+            pause = 5
+            for i in range(10):
                 try:
                     send_message(service, 'me', msg)
                     emails_sent.append(info['name'])
                     break
                 except Exception as e:
-                    if i == 2:
-                        raise Exception('Sending failed: ' + str(e))
+                    if i == 9:
+                        f = open('emails_sent.txt', 'w')
+                        for e in emails_sent:
+                            f.write(e + '\n')
                         f.close()
-                    time.sleep(5)
-        os.remove(info['report_name'] + '.pdf')
-        time.sleep(5)
+                        raise Exception('Sending failed: ' + str(e))
+                    time.sleep(pause)
+                    if pause < 60:
+                        pause = pause * 2
+        time.sleep(random.randint(5, 10))
 
     f = open('emails_sent.txt', 'w')
     for e in emails_sent:
@@ -276,39 +282,62 @@ def get_name_parts(name):
     return parts
 
 
+def post_proc(resp, content):
+    print(resp)
+    return content
+
 def export_pdfs(service, reports, reports_pdf_folder_id, export_pdfs_enabled):
     for report in reports:
         print(report)
-        print('Exporting ' + report[1] + ' to PDF...')
-        request = service.files().export_media(
-            fileId=report[0], mimeType='application/pdf')
-        request.uri = request.uri + '&rnd=' + get_random_string(16)
-        for i in range(3):
-            try:
-                response = request.execute()
-                print(len(response))
-                if len(response) == 0:
-                    raise errors.HttpError(response, '')
-                break
-            except errors.HttpError, error:
-                print('Download failed.  Retrying...')
-                if i == 2:
-                    raise
-                time.sleep(5)
-        with open(report[1] + '.pdf', "wb") as wer:
-            wer.write(response)
-        print('Download done')
+        print('Downloading ' + report[1] + ' ...')
+        if os.path.exists(report[1] + '.pdf'):
+            print('Already exists')
+        else:
+            pause = 5
+            while True:
+                request = service.files().export(
+                    fileId=report[0], mimeType='application/pdf')
+                request.uri = request.uri + '&rnd=' + get_random_string(256)
+                # request.postproc = post_proc
+                print(request.http)
+                print(request.headers)
+                print(request.uri)
+                print(request.method)
+                print(request.resumable)
+                try:
+                    response = request.execute()
+                    print(len(response))
+                    if len(response) == 0:
+                        raise Exception('Empty file')
+                    break
+                except Exception as e:
+                    print('Download failed: %s.  Retrying...' % (str(e),))
+                    time.sleep(pause)
+                    if pause < 60:
+                        pause = pause * 2
+            with open(report[1] + '.pdf', "wb") as wer:
+                wer.write(response)
+            print('Download done')
 
         if export_pdfs_enabled:
-            file_metadata = {
-                'name' : report[1],
-                'parents': [reports_pdf_folder_id],
-                'mimeType' : 'application/pdf'}
-            media = MediaFileUpload(report[1] + '.pdf',
-                                    mimetype='application/pdf',
-                                    resumable=True)
-            file = service.files().create(
-               body=file_metadata, media_body=media, fields='id').execute()
+            pause = 5
+            while True:
+                try:
+                    file_metadata = {
+                        'name' : report[1],
+                        'parents': [reports_pdf_folder_id],
+                        'mimeType' : 'application/pdf'}
+                    media = MediaFileUpload(report[1] + '.pdf',
+                                            mimetype='application/pdf',
+                                            resumable=True)
+                    file = service.files().create(
+                       body=file_metadata, media_body=media,
+                       fields='id').execute()
+                except Exception as e:
+                    print('Upload failed: %s.  Retrying...' % (str(e),))
+                    time.sleep(pause)
+                    if pause < 60:
+                        pause = pause * 2
 
 
 def send_message(service, user_id, message):
